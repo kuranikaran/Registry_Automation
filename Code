@@ -1,0 +1,80 @@
+#CaseStudy 
+
+param ( 
+    [switch]$SaveBaseline 
+) 
+
+$registryKeys = @( 
+    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run", 
+    "HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce", 
+    "HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon", 
+    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run", 
+    "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" 
+) 
+
+$baselineFile = "C:\Users\Administrator\Desktop\baseline.txt" 
+$changesFile = "C:\Users\Administrator\Desktop\changes.txt"  
+
+function Get-RegistrySnapshot { 
+    $snapshot = @() 
+    foreach ($key in $registryKeys) { 
+        if (Test-Path $key) { 
+            $entries = Get-ItemProperty -Path $key 
+            foreach ($entry in $entries.PSObject.Properties) { 
+                $snapshot += "$key|$($entry.Name)|$($entry.Value)".Trim() 
+            } 
+        } 
+    } 
+    return $snapshot 
+} 
+
+function Save-Baseline { 
+    $currentSnapshot = Get-RegistrySnapshot 
+    $currentSnapshot | Out-File -FilePath $baselineFile -Encoding utf8 
+    Write-Host "Baseline saved to $baselineFile" 
+} 
+
+function Compare-Registry { 
+    if (Test-Path $baselineFile) { 
+        $currentSnapshot = Get-RegistrySnapshot 
+        $baselineSnapshot = Get-Content -Path $baselineFile 
+
+        $baselineSnapshot = $baselineSnapshot | ForEach-Object { $_.Trim() } 
+        $currentSnapshot = $currentSnapshot | ForEach-Object { $_.Trim() } 
+
+        $added = Compare-Object -ReferenceObject $baselineSnapshot -DifferenceObject $currentSnapshot | Where-Object { $_.SideIndicator -eq '=>' } 
+        $removed = Compare-Object -ReferenceObject $baselineSnapshot -DifferenceObject $currentSnapshot | Where-Object { $_.SideIndicator -eq '<=' } 
+
+        if ($added -or $removed) { 
+            Add-Content -Path $changesFile -Value "[$(Get-Date)] Registry Changes Detected:" 
+            Add-Content -Path $changesFile -Value "---------------------------------------" 
+             
+            if ($added) { 
+                Add-Content -Path $changesFile -Value "Added Entries:" 
+                $added | ForEach-Object { Add-Content -Path $changesFile -Value "  + $($_.InputObject)" } 
+            } 
+             
+            if ($removed) { 
+                Add-Content -Path $changesFile -Value "Removed Entries:" 
+                $removed | ForEach-Object { Add-Content -Path $changesFile -Value "  - $($_.InputObject)" } 
+            } 
+             
+            Add-Content -Path $changesFile -Value "---------------------------------------" 
+            Write-Host "Changes detected. Check the log at $changesFile" 
+        } else { 
+            Write-Host "No changes detected." 
+        } 
+    } else { 
+        Write-Host "No baseline found. Please run the script with the -SaveBaseline switch to create one." 
+    } 
+} 
+
+if (!(Test-Path "C:\Users\Administrator\Desktop")) { 
+    New-Item -ItemType Directory -Path "C:\Users\Administrator\Desktop" 
+} 
+
+if ($SaveBaseline) { 
+    Save-Baseline 
+} else { 
+    Compare-Registry 
+}
